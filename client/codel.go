@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/user"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/lxc/lxd/shared/api"
+	"github.com/olekukonko/tablewriter"
 	"golang.org/x/crypto/ssh/terminal"
 	"golang.org/x/oauth2"
 )
@@ -45,25 +48,22 @@ type tokenJSON struct {
 }
 
 func main() {
-
-	switch os.Args[1] {
-	case "login":
-		login()
-	case "account":
-		switch os.Args[2] {
-		case "info":
-			data := &tokenJSON{}
-			target := &userInfo{}
-
-			usr, error := user.Current()
-			check(error, "Could not get active user")
-			file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
-			_ = json.Unmarshal([]byte(file), &data)
-
-			getJSONAuth("https://sso.compsoc.ie/auth/realms/base/protocol/openid-connect/userinfo", data, target)
-
-			fmt.Println(target)
-
+	if len(os.Args) == 1 {
+		defaultPrintout()
+	} else {
+		switch os.Args[1] {
+		case "account":
+			switch os.Args[2] {
+			case "info":
+				accountInfo()
+			case "login":
+				accountLogin()
+			}
+		case "images":
+			switch os.Args[2] {
+			case "info":
+				imagesInfo()
+			}
 		}
 	}
 }
@@ -116,10 +116,9 @@ func verifyTokenExists() bool {
 	}
 
 	return true
-
 }
 
-func login() {
+func accountLogin() {
 
 	usr, error := user.Current()
 	check(error, "Could not get active user")
@@ -161,4 +160,50 @@ func login() {
 			fmt.Print("\nSuccessfully logged in. Session saved to " + usr.HomeDir + "/.codel/token.json\n")
 		}
 	}
+}
+
+func accountInfo() {
+	data := &tokenJSON{}
+	target := &userInfo{}
+
+	usr, error := user.Current()
+	check(error, "Could not get active user")
+	file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
+	_ = json.Unmarshal([]byte(file), &data)
+
+	getJSONAuth("https://sso.compsoc.ie/auth/realms/base/protocol/openid-connect/userinfo", data, target)
+
+	fmt.Println(target)
+}
+
+func imagesInfo() {
+	data := &tokenJSON{}
+	images := &([]api.Image{})
+
+	usr, error := user.Current()
+	check(error, "Could not get active user")
+	file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
+	_ = json.Unmarshal([]byte(file), &data)
+
+	getJSONAuth("https://hal.compsoc.ie:8081/listImages", data, images)
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"ALIAS", "DESCRIPTION", "SIZE"})
+	table.SetAutoWrapText(false)
+
+	for _, i := range *images {
+		table.Append([]string{i.ImagePut.Properties["os"], i.ImagePut.Properties["description"], strconv.FormatInt(i.Size/1000000, 10) + " MiB"})
+	}
+	table.Render() // Send output
+}
+
+func defaultPrintout() {
+	fmt.Println("Manage CompSoc account and services from the command line.")
+	fmt.Println("\nUsage:\n  codel [command]")
+	fmt.Println("\nAvailable commands:")
+	fmt.Println("  account\tManage CompSoc Account")
+	fmt.Println("  container\tManage container(s)")
+	fmt.Println("\nFlags:")
+	fmt.Println("  -d, --debug\tPrint debug messages")
+	fmt.Println("  -h, --help\tHelp for [command]")
 }
