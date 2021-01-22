@@ -3,35 +3,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os/user"
 
 	"github.com/gorilla/mux"
 	lxd "github.com/lxc/lxd/client"
 	//"github.com/lxc/lxd/shared/api"
 )
 
-var lxcSocketLocation = "/var/snap/lxd/common/lxd/unix.socket"
-
-func homePage(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Homepage Endpoint Hit")
-}
-
-func listContainers(w http.ResponseWriter, r *http.Request) {
-
-	c, err := lxd.ConnectLXDUnix(lxcSocketLocation, nil)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	instanceFullArray, err := c.GetInstancesFull("container")
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	jsonData, err := json.MarshalIndent(instanceFullArray, "", "    ")
-	fmt.Fprintf(w, string(jsonData))
-}
+var lxcCurrentVersion = "19009"
 
 func handleRequests() {
 	myRouter := mux.NewRouter().StrictSlash(true)
@@ -48,9 +30,47 @@ func main() {
 	handleRequests()
 }
 
+func homePage(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Homepage Endpoint Hit")
+}
+
+func lxcBind() (lxd.InstanceServer, error) {
+	usr, err := user.Current()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	TLSServerCert, err := ioutil.ReadFile(usr.HomeDir + "/snap/lxd/" + lxcCurrentVersion + "/.config/lxc/servercerts/hal.crt")
+	TLSClientCert, err := ioutil.ReadFile(usr.HomeDir + "/snap/lxd/" + lxcCurrentVersion + "/.config/lxc/client.crt")
+	TLSClientKey, err := ioutil.ReadFile(usr.HomeDir + "/snap/lxd/" + lxcCurrentVersion + "/.config/lxc/client.key")
+
+	connectionArgs := &lxd.ConnectionArgs{
+		TLSServerCert: string(TLSServerCert),
+		TLSClientCert: string(TLSClientCert),
+		TLSClientKey:  string(TLSClientKey),
+	}
+
+	return lxd.ConnectLXD("https://hal.compsoc.ie:8000", connectionArgs)
+}
+
+func listContainers(w http.ResponseWriter, r *http.Request) {
+	c, err := lxcBind()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	instanceArray, err := c.GetInstances("container")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	jsonData, err := json.Marshal(instanceArray)
+	fmt.Fprintf(w, string(jsonData))
+}
+
 func listImages(w http.ResponseWriter, r *http.Request) { // ListImages for /listimages
 
-	c, err := lxd.ConnectLXDUnix("/var/snap/lxd/common/lxd/unix.socket", nil)
+	c, err := lxcBind()
 	if err != nil {
 		fmt.Println(err)
 	}

@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/lxc/lxd/shared/api"
 	"github.com/olekukonko/tablewriter"
@@ -25,7 +25,7 @@ type userInfo struct {
 	FirstName     string `json:"given_name"`
 	LastName      string `json:"family_name"`
 	Email         string `json:"email"`
-	UIDNumber     string `json:"uidNumber"`
+	UIDNumber     int    `json:"uidNumber"`
 }
 
 var hostURL = "http://localhost:8081"
@@ -42,31 +42,96 @@ func main() {
 			case "login":
 				accountLogin()
 			}
-		case "containers":
-			switch os.Args[2] {
-			case "list":
-				switch os.Args[3] {
-				case "all":
-					containersListAll()
+		case "containerd":
+			if len(os.Args) >= 2 {
+				switch os.Args[2] {
+				case "list":
+					switch os.Args[3] {
+					case "all":
+						containerdListAll()
+					}
+				case "images":
+					switch os.Args[3] {
+					case "list":
+						containerdImagesList()
+					}
 				}
-			}
-		case "images":
-			switch os.Args[2] {
-			case "info":
-				imagesInfo()
+			} else {
+				containerdPrintout()
 			}
 		}
 	}
 }
 
-func check(e error, str string) bool {
-	if e != nil {
-		fmt.Println(str)
-		panic(e)
-	} else {
-		return false
-	}
+/*
+ *
+ * CONTAINERD
+ *
+ */
+
+func containerdPrintout() {
+	fmt.Println("Usage:\n  codel containerd [command]")
+	fmt.Println("\nAvailable commands:")
+	fmt.Println("  images\tList available container images")
+	fmt.Println("  list\t\tList containerd")
 }
+
+func containerdListAll() {
+	containers := &([]api.Container{})
+
+	c, err := getHTTPClient()
+	if err != nil {
+		panic(err)
+	}
+
+	resp, err := c.Get(hostURL + "/listContainers")
+	if err != nil {
+		panic(err)
+	}
+
+	json.NewDecoder(resp.Body).Decode(containers)
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"NAME", "OS", "STATUS", "LAST SEEN"})
+	table.SetAutoWrapText(false)
+
+	for _, i := range *containers {
+		table.Append([]string{i.Name, i.ContainerPut.Config["image.os"], i.Status, i.LastUsedAt.UTC().Format(time.UnixDate)})
+	}
+
+	table.Render() // Send output
+}
+
+func containerdImagesList() {
+	images := &([]api.Image{})
+
+	c, err := getHTTPClient()
+	if err != nil {
+		panic(err)
+	}
+
+	resp, err := c.Get(hostURL + "/listImages")
+	if err != nil {
+		panic(err)
+	}
+
+	json.NewDecoder(resp.Body).Decode(images)
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"ALIAS", "DESCRIPTION", "SIZE"})
+	table.SetAutoWrapText(false)
+
+	for _, i := range *images {
+		table.Append([]string{i.ImagePut.Properties["os"], i.ImagePut.Properties["description"], strconv.FormatInt(i.Size/1000000, 10) + " MiB"})
+	}
+	table.Render() // Send output
+}
+
+/*
+ *
+ * ACCOUNT
+ *
+ */
 
 func accountLogin() {
 
@@ -113,70 +178,49 @@ func accountLogin() {
 }
 
 func accountInfo() {
-	data := &tokenJSON{}
-	target := &userInfo{}
+	userInfo := &userInfo{}
 
-	usr, error := user.Current()
-	check(error, "Could not get active user")
-	file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
-	_ = json.Unmarshal([]byte(file), &data)
+	c, err := getHTTPClient()
+	if err != nil {
+		panic(err)
+	}
 
-	getJSONAuth("https://sso.compsoc.ie/auth/realms/base/protocol/openid-connect/userinfo", data, target)
+	resp, err := c.Get("https://sso.compsoc.ie/auth/realms/base/protocol/openid-connect/userinfo")
+	if err != nil {
+		panic(err)
+	}
 
-	fmt.Println(target)
-}
-
-func imagesInfo() {
-	data := &tokenJSON{}
-	images := &([]api.Image{})
-
-	usr, error := user.Current()
-	check(error, "Could not get active user")
-	file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
-	_ = json.Unmarshal([]byte(file), &data)
-
-	getJSONAuth(hostURL+"/listImages", data, images)
+	json.NewDecoder(resp.Body).Decode(userInfo)
 
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"ALIAS", "DESCRIPTION", "SIZE"})
+	table.SetHeader([]string{"UIDNUMBER", "UID", "FIRST NAME", "LAST NAME", "EMAIL"})
 	table.SetAutoWrapText(false)
-
-	for _, i := range *images {
-		table.Append([]string{i.ImagePut.Properties["os"], i.ImagePut.Properties["description"], strconv.FormatInt(i.Size/1000000, 10) + " MiB"})
-	}
+	table.Append([]string{strconv.Itoa(userInfo.UIDNumber), userInfo.Username, userInfo.FirstName, userInfo.LastName, userInfo.Email})
 	table.Render() // Send output
 }
 
-func containersListAll() {
-	data := &tokenJSON{}
-	containers := &([]api.Container{})
-
-	usr, error := user.Current()
-	check(error, "Could not get active user")
-	file, _ := ioutil.ReadFile(usr.HomeDir + "/.codel/token.json")
-	_ = json.Unmarshal([]byte(file), &data)
-
-	getJSONAuth(hostURL+"/listContainers", data, containers)
-
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"ALIAS", "DESCRIPTION", "SIZE"})
-	table.SetAutoWrapText(false)
-
-	/*for _, i := range *images {
-		table.Append([]string{i.ImagePut.Properties["os"], i.ImagePut.Properties["description"], strconv.FormatInt(i.Size/1000000, 10) + " MiB"})
-	}
-	table.Render() // Send output*/
-
-	fmt.Println(containers)
-}
+/*
+ *
+ * MISC
+ *
+ */
 
 func defaultPrintout() {
 	fmt.Println("Manage CompSoc account and services from the command line.")
 	fmt.Println("\nUsage:\n  codel [command]")
 	fmt.Println("\nAvailable commands:")
 	fmt.Println("  account\tManage CompSoc Account")
-	fmt.Println("  container\tManage container(s)")
+	fmt.Println("  containerd\tManage container(s)")
 	fmt.Println("\nFlags:")
 	fmt.Println("  -d, --debug\tPrint debug messages")
 	fmt.Println("  -h, --help\tHelp for [command]")
+}
+
+func check(e error, str string) bool {
+	if e != nil {
+		fmt.Println(str)
+		panic(e)
+	} else {
+		return false
+	}
 }

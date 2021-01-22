@@ -76,7 +76,7 @@ func CheckUserIsAdminUserAuthMiddleware(next http.HandlerFunc) http.HandlerFunc 
 			}
 		}
 
-		res.WriteHeader(http.StatusUnauthorized)
+		res.WriteHeader(http.StatusForbidden)
 		return
 	}
 }
