@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
-
+	"flag"
 	"github.com/lxc/lxd/shared/api"
 	"github.com/olekukonko/tablewriter"
 	"golang.org/x/crypto/ssh/terminal"
@@ -31,36 +31,7 @@ type userInfo struct {
 var hostURL = "http://localhost:8081"
 
 func main() {
-	if len(os.Args) == 1 {
-		defaultPrintout()
-	} else {
-		switch os.Args[1] {
-		case "account":
-			switch os.Args[2] {
-			case "info":
-				accountInfo()
-			case "login":
-				accountLogin()
-			}
-		case "containerd":
-			if len(os.Args) >= 2 {
-				switch os.Args[2] {
-				case "list":
-					switch os.Args[3] {
-					case "all":
-						containerdListAll()
-					}
-				case "images":
-					switch os.Args[3] {
-					case "list":
-						containerdImagesList()
-					}
-				}
-			} else {
-				containerdPrintout()
-			}
-		}
-	}
+	commandParser()
 }
 
 /*
@@ -222,5 +193,41 @@ func check(e error, str string) bool {
 		panic(e)
 	} else {
 		return false
+	}
+}
+
+func commandParser(){
+
+	accountCmd := flag.NewFlagSet("account", flag.ExitOnError)
+	accountInfo := accountCmd.Bool("info", false, "Display account information")
+	accountLogin := accountCmd.Bool("login", false, "Login to account")
+
+	containerdCmd := flag.NewFlagSet("containerd", flag.ExitOnError)
+	containerdList := containerdCmd.Bool("list", false, "List containers")
+	containerdImages := containerdCmd.Bool("image", false, "List available images")
+	
+	if len(os.Args) < 2 {
+		defaultPrintout()
+	} else {
+		switch os.Args[1] {
+
+			case "account":
+				accountCmd.Parse(os.Args[2:])
+				if *accountInfo {
+					accountInfo()
+				} else if *accountLogin {
+					accountLogin()
+				}
+
+			case "containerd":
+				containerdCmd.Parse(os.Args[2:])
+				if *containerdList {
+					containerdListAll()
+				} else if *containerdImages {
+					containerdImageList()
+				} else {
+					containerdPrintout()
+				}
+		}
 	}
 }
